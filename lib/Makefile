@@ -40,11 +40,12 @@ LIBVER_MINOR := $(shell echo $(LIBVER_MINOR_SCRIPT))
 LIBVER_PATCH := $(shell echo $(LIBVER_PATCH_SCRIPT))
 LIBVER := $(shell echo $(LIBVER_SCRIPT))
 
+#CC=icc
 
 DESTDIR?=
 PREFIX ?= /usr/local
 CPPFLAGS= -DXXH_NAMESPACE=LZ4_
-CFLAGS ?= -O3
+CFLAGS ?= -O3 -mavx2
 CFLAGS += -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual -Wstrict-prototypes
 FLAGS   = $(CPPFLAGS) $(CFLAGS) $(LDFLAGS)
 
@@ -71,14 +72,14 @@ default: liblz4
 all: liblz4
 
 liblz4: *.c
-	@echo compiling static library
-	@$(CC) $(FLAGS) -c $^
-	@$(AR) rcs $@.a *.o
-	@echo compiling dynamic library $(LIBVER)
-	@$(CC) $(FLAGS) -shared $^ -fPIC $(SONAME_FLAGS) -o $@.$(SHARED_EXT_VER)
-	@echo creating versioned links
-	@ln -sf $@.$(SHARED_EXT_VER) $@.$(SHARED_EXT_MAJOR)
-	@ln -sf $@.$(SHARED_EXT_VER) $@.$(SHARED_EXT)
+	echo compiling static library
+	$(CC) $(FLAGS) -c $^
+	$(AR) rcs $@.a *.o
+	echo compiling dynamic library $(LIBVER)
+	$(CC) $(FLAGS) -shared $^ -fPIC $(SONAME_FLAGS) -o $@.$(SHARED_EXT_VER)
+	echo creating versioned links
+	ln -sf $@.$(SHARED_EXT_VER) $@.$(SHARED_EXT_MAJOR)
+	ln -sf $@.$(SHARED_EXT_VER) $@.$(SHARED_EXT)
 
 clean:
 	@$(RM) -f core *.o *.a *.$(SHARED_EXT) *.$(SHARED_EXT).* liblz4.pc

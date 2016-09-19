@@ -30,6 +30,8 @@
 #  - LZ4 forum froup : https://groups.google.com/forum/#!forum/lz4c
 # ################################################################
 
+CC=icc
+
 DESTDIR?=
 PREFIX ?= /usr/local
 
@@ -92,6 +94,7 @@ cmake:
 	@cd cmake_unofficial; cmake CMakeLists.txt; $(MAKE)
 
 gpptest: clean
+	$(MAKE) all CC=g++ CFLAGS="-g -I../lib -Wall -Wextra -Wundef -Wshadow -Wcast-align -Werror"
 	$(MAKE) all CC=g++ CFLAGS="-O3 -I../lib -Wall -Wextra -Wundef -Wshadow -Wcast-align -Werror"
 
 clangtest: clean

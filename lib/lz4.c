@@ -560,8 +560,30 @@ FORCE_INLINE int LZ4_compress_generic(
                 || (LZ4_read32(match+refDelta) != LZ4_read32(ip)) );
         }
 
+        /*
+           byte* ip
+           const BYTE* anchor = (const BYTE*) source;
+           const BYTE* match;
+           size_t refDelta=0;
+           const BYTE* lowLimit;
+           */
         /* Catch up */
-        while (((ip>anchor) & (match+refDelta > lowLimit)) && (unlikely(ip[-1]==match[refDelta-1]))) { ip--; match--; }
+#if 1
+        while (
+                ((ip>anchor) & (match+refDelta > lowLimit)) 
+                && 
+                (unlikely(ip[-1]==match[refDelta-1]))) 
+        { ip--; match--; }
+#else
+        if(ip[-1]==match[refDelta-1])
+            while (
+                    ((ip>anchor) & (match+refDelta > lowLimit)) 
+                    && 
+                    (unlikely(ip[-1]==match[refDelta-1]))) 
+            { ip--; match--; }
+
+#endif
+
 
         /* Encode Literals */
         {   unsigned const litLength = (unsigned)(ip - anchor);
