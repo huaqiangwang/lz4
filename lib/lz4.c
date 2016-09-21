@@ -50,6 +50,7 @@
 #define ACCELERATION_DEFAULT 1
 
 
+#include <stdio.h>
 /*-************************************
 *  CPU Feature Detection
 **************************************/
@@ -88,6 +89,7 @@
 *  Includes
 **************************************/
 #include "lz4.h"
+#include <emmintrin.h>
 
 
 /*-************************************
@@ -427,6 +429,44 @@ static U32 LZ4_hashSequence64(size_t sequence, tableType_t const tableType)
     const U32 hashMask = (1<<hashLog) - 1;
     return ((sequence * prime5bytes) >> (40 - hashLog)) & hashMask;
 }
+#if 0
+static U32 LZ4_hashSequence64_8(size_t *sequence, tableType_t const tableType)
+{
+    static int hashCounter=0;
+    size_t _tMul[8];
+    size_t hashBuf[8];
+
+    int i;
+    const U32 hashLog = (tableType == byU16) ? LZ4_HASHLOG+1 : LZ4_HASHLOG;
+
+    const U32 hashMask = (1<<hashLog) - 1;
+
+    if(hashCounter ==0){
+        for(i=0;i<8;i++)
+            _tMul[i] = sequence[i]*prime5bytes;
+
+        asm(
+                "vmovdqu %[addrtMula0], %%ymm0 \t\n"
+                "vmovdqu %[addrtMula1], %%ymm1 \t\n"
+                "vsrlq %6,%%ymm0 \t\n"
+                "vsrlq %6,%%ymm1 \t\n"
+                "vpbroadcastd %7, %%ymm2 \t\n"
+                "vpand %%ymm0,%%ymm2, %%ymm0\t\n"
+                "vpand %%ymm1,%%ymm2, %%ymm1\t\n"
+                "vmovdqu %%ymm0, %[addrhashBuf0]\t\n"
+                "vmovdqu %%ymm1, %[addrhashBuf]\t\n"
+
+                :[addrhashBuf0] "=m"(hashBuf), [addrhashBuf1] "=m"(hashBuf+4)
+                :[addrtMula0] "m" (_tMul), 
+                [addrtMula1] "m"(_tMul+4),
+                "x"(40-hashLog),"x"(hashMask)
+                : "%xmm0")
+                
+    }
+
+    return ((sequence * prime5bytes) >> (40 - hashLog)) & hashMask;
+}
+#endif
 
 static U32 LZ4_hashSequenceT(size_t sequence, tableType_t const tableType)
 {
@@ -466,6 +506,43 @@ static const BYTE* LZ4_getPosition(const BYTE* p, void* tableBase, tableType_t t
     return LZ4_getPositionOnHash(h, tableBase, tableType, srcBase);
 }
 
+static U32 LZ4_hashSequence64_8(int reset, size_t *sequence, tableType_t const tableType)
+{
+    static int hashPoolIndex=8;
+//    size_t _tMul[8];
+    static size_t hashBuf[8];
+    U32 retHash ;
+    int i;
+
+    if(reset)
+        hashPoolIndex = 8;
+    else
+        printf("no reset\n");
+
+    /* 
+     * if hashpoolCount = 7 -->valid
+     *  (hashPoolIndex<8) :true
+     *  return hashPoolIndex[7]
+     */
+    if(hashPoolIndex<8)
+    {
+        retHash= (U32)hashBuf[hashPoolIndex];
+        hashPoolIndex ++;
+        return retHash;
+    }
+    else
+    {
+
+        const U32 hashLog = (tableType == byU16) ? LZ4_HASHLOG+1 : LZ4_HASHLOG;
+        const U32 hashMask = (1<<hashLog) - 1;
+
+        for(i=0;i<8;i++)
+           hashBuf[i] = ((sequence[i]*prime5bytes)>> (40 - hashLog)) & hashMask;
+
+        hashPoolIndex = 1;
+        return (U32)hashBuf[0];
+    }
+}
 
 /** LZ4_compress_generic() :
     inlined, to ensure branches are decided at compilation time */
@@ -525,23 +602,56 @@ FORCE_INLINE int LZ4_compress_generic(
     /* First Byte */
     LZ4_putPosition(ip, ctx, tableType, base);
     ip++; forwardH = LZ4_hashPosition(ip, tableType);
-
     /* Main Loop */
     for ( ; ; ) {
         const BYTE* match;
         BYTE* token;
 
         /* Find a match */
-        {   const BYTE* forwardIp = ip;
-            unsigned step = 1;
+        {  const  BYTE* forwardIp = ip;
             unsigned searchMatchNb = acceleration << LZ4_skipTrigger;
+            unsigned step = 1;
+#define BATCH_HASHCODE     1
+#ifdef BATCH_HASHCODE
+            size_t _fllIP[8];
+            const BYTE *_ip [9];
+            static int batchIndex=8;
+#endif
+
             do {
                 U32 const h = forwardH;
+#ifdef BATCH_HASHCODE
+                int i;
+                unsigned _searchMatchNb ;
+                batchIndex=8;
+                batchIndex ++;
+                
+                if(batchIndex >7)
+                {
+                    _searchMatchNb = searchMatchNb;
+                    _ip[0] = forwardIp;
+                  //  printf("forwardIp = %d, ip[0] = %d\n",forwardIp, _ip[0]);
+                    for(i=0;i<8;i++){
+                        _ip[i+1] =_ip[i]+step;
+                 //       printf("step = %d, ip[%d]=%d,ip[%d+1]=%d\n",step,i,_ip[i],i,_ip[i+1]);
+                        step= (_searchMatchNb++ >> LZ4_skipTrigger);
+                        _fllIP[i] =*(const size_t*)_ip[i+1];
+                    }
+                    batchIndex = 0;
+                }
+                ip=_ip[batchIndex];
+                forwardIp=_ip[batchIndex+1];
+
+                searchMatchNb++;
+                if (unlikely(_ip[1+batchIndex]> mflimit)) goto _last_literals;
+#else
                 ip = forwardIp;
                 forwardIp += step;
                 step = (searchMatchNb++ >> LZ4_skipTrigger);
+                //printf("forwardIp=%d\n",forwardIp);
 
                 if (unlikely(forwardIp > mflimit)) goto _last_literals;
+#endif
 
                 match = LZ4_getPositionOnHash(h, ctx, tableType, base);
                 if (dict==usingExtDict) {
@@ -551,8 +661,16 @@ FORCE_INLINE int LZ4_compress_generic(
                     } else {
                         refDelta = 0;
                         lowLimit = (const BYTE*)source;
-                }   }
+                }   
+                }
+        //        _mm_prefetch((ip -1),_MM_HINT_T0);               
+                //_mm_prefetch((match+refDelta -1),_MM_HINT_T0);               
+#ifdef BATCH_HASHCODE
+                forwardH = LZ4_hashSequence64_8(!batchIndex,_fllIP,tableType);
+#else
                 forwardH = LZ4_hashPosition(forwardIp, tableType);
+#endif
+                    
                 LZ4_putPositionOnHash(ip, h, ctx, tableType, base);
 
             } while ( ((dictIssue==dictSmall) ? (match < lowRefLimit) : 0)
@@ -568,19 +686,59 @@ FORCE_INLINE int LZ4_compress_generic(
            const BYTE* lowLimit;
            */
         /* Catch up */
+#if 0
 #if 1
+        int _v=0;
+
+        do{
+            _v = !!((ip-anchor)&(match+refDelta - lowLimit)&(!(ip[-1]-match[refDelta-1])));
+//
+ //           asm __volatile__ ("nop\n"
+  //                  "nop\n"
+   //                 "nop\n");
+
+            ip -= _v;
+            match -=_v;
+        }while(_v);
+#else
         while (
                 ((ip>anchor) & (match+refDelta > lowLimit)) 
                 && 
                 (unlikely(ip[-1]==match[refDelta-1]))) 
         { ip--; match--; }
+#endif
 #else
+//#define __DEBUG 
         if(ip[-1]==match[refDelta-1])
-            while (
-                    ((ip>anchor) & (match+refDelta > lowLimit)) 
-                    && 
-                    (unlikely(ip[-1]==match[refDelta-1]))) 
-            { ip--; match--; }
+        {
+
+#ifdef __DEBUG
+            asm __volatile__ ("nop\n"
+                    "nop\n"
+                    "nop\n");
+#endif
+            if((ip>anchor) & (match+refDelta > lowLimit)) 
+            {
+                ip--; match--; 
+            }
+            else
+            {
+                while (
+                        ((ip>anchor) & (match+refDelta > lowLimit)) 
+                        && 
+                        (unlikely(ip[-1]==match[refDelta-1]))) 
+                {
+                    ip--; match--; 
+#ifdef __DEBUG
+                    asm __volatile__ ("nop\n"
+                            "nop\n"
+                            "nop\n"
+                            "nop\n"
+                            "nop\n");
+#endif
+                }
+            }
+        }
 
 #endif
 
@@ -811,7 +969,7 @@ static int LZ4_compress_destSize_generic(
                 match = LZ4_getPositionOnHash(h, ctx, tableType, base);
                 forwardH = LZ4_hashPosition(forwardIp, tableType);
                 LZ4_putPositionOnHash(ip, h, ctx, tableType, base);
-
+                
             } while ( ((tableType==byU16) ? 0 : (match + MAX_DISTANCE < ip))
                 || (LZ4_read32(match) != LZ4_read32(ip)) );
         }

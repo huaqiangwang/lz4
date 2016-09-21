@@ -45,7 +45,7 @@ LIBVER := $(shell echo $(LIBVER_SCRIPT))
 DESTDIR?=
 PREFIX ?= /usr/local
 CPPFLAGS= -DXXH_NAMESPACE=LZ4_
-CFLAGS ?= -O3 -mavx2
+CFLAGS = -g -mavx2 -DBATCH_HASHCODE
 CFLAGS += -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual -Wstrict-prototypes
 FLAGS   = $(CPPFLAGS) $(CFLAGS) $(LDFLAGS)
 
