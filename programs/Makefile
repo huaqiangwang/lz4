@@ -40,7 +40,7 @@ BINDIR  := $(PREFIX)/bin
 MANDIR  := $(PREFIX)/share/man/man1
 LZ4DIR  := ../lib
 
-CFLAGS  ?= -O3   # can select custom flags. For example : CFLAGS="-O2 -g" mak
+CFLAGS  ?= -O3 -mavx2  # can select custom flags. For example : CFLAGS="-O2 -g" mak
 CFLAGS  += -Wall -Wextra -Wundef -Wcast-qual -Wcast-align -Wshadow -Wswitch-enum -Wdeclaration-after-statement -Wstrict-prototypes
 CFLAGS  += $(MOREFLAGS)
 CPPFLAGS:= -I$(LZ4DIR) -DXXH_NAMESPACE=LZ4_
