@@ -136,47 +136,21 @@ static U32 LZ4HC_hashPtr(const BYTE* index)
 
    // static U32 count=0;
     static U32 hashBuf[AVX2_COUNT_32] __attribute__((aligned(32)));
-    static const BYTE* pCacheIndex = NULL;
     static const BYTE* pBase = NULL;
 
     U32 retHash;
-//    printf("index=%d,pCacheIndex=%d,pBase=%d",
- //           index,pCacheIndex,pBase);
 
-    static int toggle=1;
-
-    if(index == pCacheIndex)
+//    printf("index=%d, pBase=%d\n",index,pBase);
+   // if(index < pBase+8)
+   if((unsigned long long)(index-pBase)<8LL)
     {
-  //      printf(" Match\n");
-     //   count++;
-        retHash = hashBuf[index - pBase];
-        pCacheIndex +=toggle;
-
-        if(pCacheIndex>=pBase+8)
-            pCacheIndex = NULL;
-
-        toggle = toggle?0:1;
-        return retHash;
-        
-    }
-    //else if(index>=pBase && index<pBase+8)
-    else if((unsigned)(index-pBase)<8)
-    {
-
-   //     printf(" Contain\n");
-    //count++;
-//if(count<4)
- //           printf("Count=%d\n",count);
-
-        retHash = hashBuf[index-pBase];
-        pCacheIndex = index+1;
-        if(pCacheIndex>=pBase+8)
-            pCacheIndex = NULL;
-        return retHash;
+        asm __volatile__("nop\t\n""nop\t\n");
+        return hashBuf[index - pBase];
     }
     else
     {
 
+        asm __volatile__("nop\t\n""nop\t\n""nop\t\n");
 
         //printf(" New\n");
          //       count = 0;
@@ -226,7 +200,7 @@ static U32 LZ4HC_hashPtr(const BYTE* index)
                 );
 
 #else
-        BYTE shufMask[32] __attribute__((aligned(32)))={
+        static BYTE shufMask[32] __attribute__((aligned(32)))={
             0,1,2,3,
             1,2,3,4,
             2,3,4,5,
@@ -237,12 +211,12 @@ static U32 LZ4HC_hashPtr(const BYTE* index)
             7,8,9,10
         };
 
-        U32 u32Magic[8] __attribute__((aligned(32)))= {0x9e3779b1,0x9e3779b1,0x9e3779b1,0x9e3779b1,
+       static U32 u32Magic[8] __attribute__((aligned(32)))= {0x9e3779b1,0x9e3779b1,0x9e3779b1,0x9e3779b1,
             0x9e3779b1,0x9e3779b1,0x9e3779b1,0x9e3779b1};
 
         static __m256i ymm1; 
         static __m256i ymm2; 
-#if 1
+#if 0
         static int load=0;
         if(load==0)
         {
@@ -268,11 +242,8 @@ static U32 LZ4HC_hashPtr(const BYTE* index)
 #endif
 
         pBase = index;
-        pCacheIndex = index;
-        toggle=1;
-        retHash = hashBuf[0];
+        return hashBuf[0];
 
-        return retHash;
     }
 }
 
