@@ -216,7 +216,7 @@ static U32 LZ4HC_hashPtr(const BYTE* index)
 
         static __m256i ymm1; 
         static __m256i ymm2; 
-#if 0
+#if 1
         static int load=0;
         if(load==0)
         {
