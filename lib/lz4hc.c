@@ -112,7 +112,7 @@ typedef struct
 //#define DELTANEXTU16(p)        chainTable[(p) & MAXD_MASK]   /* flexible, MAXD dependent */
 #define DELTANEXTU16(p)        chainTable[(U16)(p)]   /* faster */
 
-static U32 LZ4HC_hashPtr(const void* ptr) { return HASH_FUNCTION(LZ4_read32(ptr)); }
+static U32 LZ4HC_hashPtr_ori(const void* ptr) { return HASH_FUNCTION(LZ4_read32(ptr)); }
 
 
 /**************************************
@@ -130,31 +130,44 @@ static void LZ4HC_init (LZ4HC_Data_Structure* hc4, const BYTE* start)
     hc4->lowLimit = 64 KB;
 }
 
-//U32 LZ4HC_bufHashPtr(const BYTE* index)
-static U32 LZ4HC_hashPtrOpt(LZ4HC_Data_Structure *hc4,const BYTE* index)
+static U32 LZ4HC_hashPtr(const BYTE* index)
 {
 #define AVX2_COUNT_32 8
 
+   // static U32 count=0;
     static U32 hashBuf[AVX2_COUNT_32] __attribute__((aligned(32)));
     static const BYTE* pCacheIndex = NULL;
     static const BYTE* pBase = NULL;
 
     U32 retHash;
+//    printf("index=%d,pCacheIndex=%d,pBase=%d",
+ //           index,pCacheIndex,pBase);
+
+    static int toggle=1;
 
     if(index == pCacheIndex)
     {
+  //      printf(" Match\n");
+     //   count++;
         retHash = hashBuf[index - pBase];
- //       _mm_prefetch(&hc4->hashTable[retHash],_MM_HINT_T0);
-        pCacheIndex++;
+        pCacheIndex +=toggle;
+
         if(pCacheIndex>=pBase+8)
             pCacheIndex = NULL;
-  //      else
-   //         _mm_prefetch(&hc4->hashTable[hashBuf[pCacheIndex-pBase]],_MM_HINT_T0);
+
+        toggle = toggle?0:1;
         return retHash;
         
     }
-    else if(index>=pBase && index<pBase+8)
+    //else if(index>=pBase && index<pBase+8)
+    else if((unsigned)(index-pBase)<8)
     {
+
+   //     printf(" Contain\n");
+    //count++;
+//if(count<4)
+ //           printf("Count=%d\n",count);
+
         retHash = hashBuf[index-pBase];
         pCacheIndex = index+1;
         if(pCacheIndex>=pBase+8)
@@ -163,6 +176,10 @@ static U32 LZ4HC_hashPtrOpt(LZ4HC_Data_Structure *hc4,const BYTE* index)
     }
     else
     {
+
+
+        //printf(" New\n");
+         //       count = 0;
 #if 0
         /*  
          *  For AVX2
@@ -225,6 +242,7 @@ static U32 LZ4HC_hashPtrOpt(LZ4HC_Data_Structure *hc4,const BYTE* index)
 
         static __m256i ymm1; 
         static __m256i ymm2; 
+#if 1
         static int load=0;
         if(load==0)
         {
@@ -232,6 +250,11 @@ static U32 LZ4HC_hashPtrOpt(LZ4HC_Data_Structure *hc4,const BYTE* index)
             ymm2 = _mm256_load_si256((__m256i*)u32Magic);
             ymm1= _mm256_load_si256((__m256i*)shufMask);
         }
+#else
+       ymm2 = _mm256_load_si256((__m256i*)u32Magic);
+            ymm1= _mm256_load_si256((__m256i*)shufMask);
+
+#endif
         __m256i ymm0;
         
 
@@ -245,12 +268,12 @@ static U32 LZ4HC_hashPtrOpt(LZ4HC_Data_Structure *hc4,const BYTE* index)
 #endif
 
         pBase = index;
-        pCacheIndex = index+1;
-
+        pCacheIndex = index;
+        toggle=1;
         retHash = hashBuf[0];
+
         return retHash;
     }
-
 }
 
 /* Update chains up to ip (excluded) */
@@ -275,7 +298,7 @@ FORCE_INLINE void LZ4HC_Insert (LZ4HC_Data_Structure* hc4, const BYTE* ip)
 #endif
 #else
 
-        U32 const h = LZ4HC_hashPtrOpt(hc4,base+idx);
+        U32 const h = LZ4HC_hashPtr(base+idx);
 #endif
         size_t delta = idx - hashTable[h];
         if (delta>MAX_DISTANCE) delta = MAX_DISTANCE;
