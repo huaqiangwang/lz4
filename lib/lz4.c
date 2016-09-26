@@ -545,13 +545,40 @@ FORCE_INLINE int LZ4_compress_generic(
 
                 match = LZ4_getPositionOnHash(h, ctx, tableType, base);
                 if (dict==usingExtDict) {
+                asm __volatile__ (
+                        "nop\t\n"
+                        "nop\t\n"
+                        );
+#if 0
+                    asm __volatile__(
+                            "mov %2,0\t\n"
+                            "mov %3,%1\t\n"
+                            "cmp %0,%1 \t\n"
+                            "cmova %2,%4 \t\n"
+                            "cmova %3,%5\t\n"
+                            :
+                            :"r"(match),"r"((const BYTE*)source),
+                            "r"(refDelta),"r"(lowLimit),
+                            "r"(dictDelta),"r"(dictionary));
+
+
+#else
+    
                     if (match < (const BYTE*)source) {
                         refDelta = dictDelta;
                         lowLimit = dictionary;
                     } else {
                         refDelta = 0;
                         lowLimit = (const BYTE*)source;
-                }   }
+                }
+
+#endif
+                    asm __volatile__ (
+                        "nop\t\n"
+                        "nop\t\n"
+                        "nop\t\n");
+
+                }
                 forwardH = LZ4_hashPosition(forwardIp, tableType);
                 LZ4_putPositionOnHash(ip, h, ctx, tableType, base);
 

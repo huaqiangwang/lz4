@@ -111,7 +111,7 @@ typedef struct
 //#define DELTANEXTU16(p)        chainTable[(p) & MAXD_MASK]   /* flexible, MAXD dependent */
 #define DELTANEXTU16(p)        chainTable[(U16)(p)]   /* faster */
 
-static U32 LZ4HC_hashPtr(const void* ptr) { return HASH_FUNCTION(LZ4_read32(ptr)); }
+static U32 LZ4HC_hashPtrOri(const void* ptr) { return HASH_FUNCTION(LZ4_read32(ptr)); }
 
 
 
@@ -130,6 +130,87 @@ static void LZ4HC_init (LZ4HC_Data_Structure* hc4, const BYTE* start)
     hc4->lowLimit = 64 KB;
 }
 
+//U32 LZ4HC_bufHashPtr(const BYTE* index)
+static U32 LZ4HC_hashPtr(const BYTE* index)
+{
+#define AVX2_COUNT_32 8
+
+    static U32 hashBuf[AVX2_COUNT_32];
+    static const BYTE* pCacheIndex = NULL;
+    static const BYTE* pBase = NULL;
+
+    U32 retHash;
+
+    if(index == pCacheIndex)
+    {
+        retHash = hashBuf[index - pBase];
+        pCacheIndex++;
+        if(pCacheIndex>=pBase+8)
+            pCacheIndex = NULL;
+        return retHash;
+    }
+    else if(index>=pBase && index<pBase+8)
+    {
+        retHash = hashBuf[index-pBase];
+        pCacheIndex = index+1;
+        if(pCacheIndex>=pBase+8)
+            pCacheIndex = NULL;
+        return retHash;
+    }
+    else
+    {
+        /*  
+         *  For AVX2
+         *  [ *(U32*)(pBase+idx), *(U32*)(pBase+idx+1), *(U32*)(pBase+idx+2), .... *(U32*)(pBase+idx+7))
+         *  Range: pBase+idx -- pBase+idx+7+3
+         *  Byte[0-10] 
+         *  --> load 16 byte to XMM
+         *  --> copy YMM[0-127] to YMM[255-128]
+         *  --> using VPSHUFB
+         *  */
+        const BYTE shufMask[32]={
+            0,1,2,3,
+            1,2,3,4,
+            2,3,4,5,
+            3,4,5,6,
+
+            4,5,6,7,
+            5,6,7,8,
+            6,7,8,9,
+            7,8,9,10
+        };
+            
+        const U32 u32Magic[8]={0x9e3779b1,0x9e3779b1,0x9e3779b1,0x9e3779b1,
+            0x9e3779b1,0x9e3779b1,0x9e3779b1,0x9e3779b1};
+
+        asm __volatile__(
+                "vmovdqu 0(%[aBase]), %%ymm0\t\n"
+                "vinserti128 $1,%%xmm0,%%ymm0,%%ymm0 \t\n"
+                "vmovdqu 0(%[aShufMask]),%%ymm1 \t\n"
+                // Get *(U32*)((BYTE*)ptr+idx++)
+                "vpshufb %%ymm1,%%ymm0,%%ymm0\t\n"
+                "vmovdqu 0(%[aU32Magic]),%%ymm1 \t\n"
+                "vpmulld %%ymm0,%%ymm1,%%ymm0 \t\n"
+                "vpsrld $17,%%ymm0,%%ymm0 \t\n"
+
+                // Store
+                "vmovdqu %%ymm0, %[ahashBuf] \t\n"
+
+                :[ahashBuf] "=m"(hashBuf)
+                :[aBase] "r"(index), 
+                [aShufMask] "r"(shufMask),
+                [aU32Magic] "r"(u32Magic)
+                :"xmm0","xmm1"
+                );
+
+        pBase = index;
+        pCacheIndex = index+1;
+
+        retHash = hashBuf[0];
+    return retHash;
+    }
+
+}
 
 /* Update chains up to ip (excluded) */
 FORCE_INLINE void LZ4HC_Insert (LZ4HC_Data_Structure* hc4, const BYTE* ip)
@@ -141,14 +222,27 @@ FORCE_INLINE void LZ4HC_Insert (LZ4HC_Data_Structure* hc4, const BYTE* ip)
     U32 idx = hc4->nextToUpdate;
 
     while (idx < target) {
+#if 0
+        U32 const h = LZ4HC_hashPtrOri(base+idx);
+#if 1
+        U32 const h_1 = LZ4HC_hashPtr(base+idx);
+        if(h_1 != h)
+            printf("Base=%p, idx=%d, error 0x%x (0x%x)\n",
+                    base,idx,h,h_1);
+    //    else
+     //       printf("Base=%p, idx=%d equals\n",base,idx);
+#endif
+#else
+
         U32 const h = LZ4HC_hashPtr(base+idx);
+#endif
         size_t delta = idx - hashTable[h];
         if (delta>MAX_DISTANCE) delta = MAX_DISTANCE;
         DELTANEXTU16(idx) = (U16)delta;
         hashTable[h] = idx;
         idx++;
     }
-
+    
     hc4->nextToUpdate = target;
 }
 
