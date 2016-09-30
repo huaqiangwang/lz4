@@ -112,8 +112,9 @@ typedef struct
 //#define DELTANEXTU16(p)        chainTable[(p) & MAXD_MASK]   /* flexible, MAXD dependent */
 #define DELTANEXTU16(p)        chainTable[(U16)(p)]   /* faster */
 
-static U32 LZ4HC_hashPtr_ori(const void* ptr) { return HASH_FUNCTION(LZ4_read32(ptr)); }
 
+//static U32 LZ4HC_hashPtr(const void* ptr) {static U32 c; c++;printf("buffer %d\n",c); return HASH_FUNCTION(LZ4_read32(ptr)); }
+static U32 LZ4HC_hashPtr(const void* ptr) { return HASH_FUNCTION(LZ4_read32(ptr)); }
 
 /**************************************
 *  HC Compression
@@ -130,7 +131,7 @@ static void LZ4HC_init (LZ4HC_Data_Structure* hc4, const BYTE* start)
     hc4->lowLimit = 64 KB;
 }
 
-static U32 LZ4HC_hashPtr(const BYTE* index)
+static U32 LZ4HC_hashPtr_o(const BYTE* index)
 {
 #define AVX2_COUNT_32 8
 
@@ -142,14 +143,12 @@ static U32 LZ4HC_hashPtr(const BYTE* index)
 
 //    printf("index=%d, pBase=%d\n",index,pBase);
    // if(index < pBase+8)
-   if((unsigned long long)(index-pBase)<8LL)
+   if((unsigned long long)(index-pBase)<8)
     {
-        asm __volatile__("nop\t\n""nop\t\n");
         return hashBuf[index - pBase];
     }
     else
     {
-
         asm __volatile__("nop\t\n""nop\t\n""nop\t\n");
 
         //printf(" New\n");
@@ -216,7 +215,7 @@ static U32 LZ4HC_hashPtr(const BYTE* index)
 
         static __m256i ymm1; 
         static __m256i ymm2; 
-#if 1
+#if 0
         static int load=0;
         if(load==0)
         {
@@ -257,22 +256,28 @@ FORCE_INLINE void LZ4HC_Insert (LZ4HC_Data_Structure* hc4, const BYTE* ip)
     U32 idx = hc4->nextToUpdate;
 
     while (idx < target) {
-#if 0
-        U32 const h = LZ4HC_hashPtrOri(base+idx);
-#if 1
-        U32 const h_1 = LZ4HC_hashPtr(base+idx);
-        if(h_1 != h)
-            printf("Base=%p, idx=%d, error 0x%x (0x%x)\n",
-                    base,idx,h,h_1);
-    //    else
-     //       printf("Base=%p, idx=%d equals\n",base,idx);
-#endif
-#else
 
         U32 const h = LZ4HC_hashPtr(base+idx);
-#endif
         size_t delta = idx - hashTable[h];
-        if (delta>MAX_DISTANCE) delta = MAX_DISTANCE;
+ //       static U32 count;
+//        count++;
+
+  //      printf("delta=%d ",delta);
+
+#if 0
+        if (delta>0xffff) {delta = MAX_DISTANCE;}
+        //printf("0xffff %d/%d\n",big,count);
+#else
+        asm __volatile__(
+                "cmp $0xffff,%1\t\n"
+                "mov $0xffff,%%rbx\t\n"
+                "cmova %%rbx,%0\t\n"
+                :"=r"(delta)
+                :"0"(delta):"rbx");
+
+#endif
+
+   //     printf("--->%d\n",delta);
         DELTANEXTU16(idx) = (U16)delta;
         hashTable[h] = idx;
         idx++;
